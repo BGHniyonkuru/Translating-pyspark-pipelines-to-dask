@@ -18,7 +18,6 @@ sudo ln -sfn $(brew --prefix openjdk@17)/libexec/openjdk.jdk /Library/Java/JavaV
 
 # Translating PySpark Pipelines to Dask – Assistant Code
 
-> **Berline Niyonkuru** – Projet Data Engineering – 2025
 
 ## Objectif
 Créer un **assistant semi-automatisé** pour migrer des pipelines PySpark vers Dask avec :

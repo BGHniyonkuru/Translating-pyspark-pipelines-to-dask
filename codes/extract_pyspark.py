@@ -1,137 +1,111 @@
-# codes/extract_pyspark.py → VERSION FINALE 100% FONCTIONNELLE – Berline Niyonkuru
-import json
-import glob
+import re
+import shutil
 from pathlib import Path
-from multiprocessing import Pool, cpu_count
 
-# === CHEMINS ABSOLUS ===
-BASE_DIR = Path(__file__).parent.parent.resolve()
-KAGGLE_NB_DIR = BASE_DIR / "data" / "kaggle_notebooks"
-GITHUB_REPOS_DIR = BASE_DIR / "data" / "github_repos"
-OUTPUT_DIR = BASE_DIR / "data" / "extracted_scripts"
-OUTPUT_DIR.mkdir(exist_ok=True)
+# Dossiers
+BASE = Path(__file__).parent.parent.resolve()
+DATA = BASE / "data"
+KAGGLE = DATA / "kaggle_notebooks"
+GITHUB = DATA / "github_repos"
 
-# === MOTS-CLÉS PYSPARK (large mais efficace) ===
-PYSPARK_KEYWORDS = [
-    "SparkSession", "spark.read", "spark.sql", "from pyspark.sql",
-    "spark.createDataFrame", ".toDF(", ".cache()", ".repartition(",
-    "spark-submit", "SparkContext", "spark.sparkContext"
+OUTPUT = DATA / "extracted_scripts"
+OUTPUT.mkdir(parents=True, exist_ok=True)
+
+# Reset extraction directory
+shutil.rmtree(OUTPUT, ignore_errors=True)
+OUTPUT.mkdir(parents=True, exist_ok=True)
+
+# =============================
+# 1) PATTERN PySpark à détecter
+# =============================
+
+PYSPARK_PATTERNS = [
+    "from pyspark.sql",
+    "spark.read",
+    "pyspark.sql",
+    "from pyspark",
+    "spark = SparkSession"
 ]
 
-# === MOTS-CLÉS QUI INDIQUENT UN VRAI PIPELINE (au moins un suffit) ===
-REAL_PIPELINE_INDICATORS = [
-    ".read.", ".csv", ".parquet", ".json", ".format(",
-    ".write.", ".save(", ".parquet(", ".csv(",
-    ".join(", ".groupBy(", ".agg(", ".filter(", ".withColumn(",
-    ".select(", ".drop(", ".union(", ".orderBy("
-]
+SPARK_READ_PATTERN = re.compile(
+    r'(spark\.read\.(csv|json|parquet)\(["\'](.+?)["\'])'
+)
 
-# === FICHIERS À EXCLURE (tests, logging, etc.) ===
-EXCLUDE_FILES = [
-    "test_", "logging.py", "logger", "setup.py", "__init__.py",
-    "conf", "config", "util", "helper", "example_test"
-]
+# =============================
+# 2) DATASETS DE TEST
+# =============================
 
-def is_excluded(filepath: str) -> bool:
-    return any(excl in filepath.lower() for excl in EXCLUDE_FILES)
+TEST_DATASETS = {
+    "csv": "data/raw_datasets/fact_table.csv",
+    "json": "data/raw_datasets/customer_dim.csv",
+    "parquet": "data/raw_datasets/fact_table.csv"
+}
 
-def contains_pyspark_and_pipeline(content: str) -> bool:
-    lower = content.lower()
-    has_pyspark = any(kw.lower() in lower for kw in PYSPARK_KEYWORDS)
-    has_pipeline = any(ind.lower() in lower for ind in REAL_PIPELINE_INDICATORS)
-    return has_pyspark and has_pipeline
+def patch_paths(code: str):
+    """Remplace tous les chemins spark.read.* par les datasets locaux."""
+    def repl(match):
+        format_ = match.group(2)
+        new_path = TEST_DATASETS.get(format_, TEST_DATASETS["csv"])
+        return f'spark.read.{format_}("{new_path}"'
 
-# === EXTRACTION .ipynb ===
-def extract_from_ipynb(nb_path: Path):
+    return SPARK_READ_PATTERN.sub(repl, code)
+
+
+# =============================
+# 3) CHERCHER DU CODE PYSPARK
+# =============================
+
+def extract_from_file(file_path: Path):
+    """Detect PySpark inside a file."""
     try:
-        with open(nb_path, 'r', encoding='utf-8') as f:
-            nb = json.load(f)
+        txt = file_path.read_text(errors="ignore")
     except:
         return None
 
-    blocks = []
-    for i, cell in enumerate(nb.get('cells', [])):
-        if cell.get('cell_type') != 'code':
+    if any(pat in txt for pat in PYSPARK_PATTERNS):
+        return txt
+    return None
+
+
+def search_in_directory(directory: Path, scripts: list):
+    for file in directory.rglob("*"):
+        if file.suffix not in [".py", ".ipynb", ".txt"]:
             continue
-        source = ''.join(cell.get('source', []))
-        if len(source.strip()) < 30:
-            continue
-        if contains_pyspark_and_pipeline(source):
-            blocks.append(f"# Cellule {i+1}\n{source.strip()}")
 
-    if blocks:
-        safe_name = "".join(c if c.isalnum() else "_" for c in nb_path.stem)
-        origin = "kaggle" if "kaggle" in str(nb_path) else "github"
-        output_file = OUTPUT_DIR / f"{safe_name}_{origin}.py"
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(f"# EXTRAIT DE → {nb_path.name}\n")
-            f.write(f"# Source → {nb_path.relative_to(BASE_DIR)}\n\n")
-            f.write("\n\n# =======================================\n\n".join(blocks))
-        print(f"EXTRAIT → {output_file.name} ({len(blocks)} blocs)")
-        return str(output_file)
-    return None
+        content = extract_from_file(file)
+        if content:
+            scripts.append((file, content))
 
-# === EXTRACTION .py ===
-def extract_from_py(py_path: Path):
-    if is_excluded(str(py_path)):
-        return None
-    try:
-        content = py_path.read_text(encoding='utf-8')
-    except:
-        return None
 
-    if contains_pyspark_and_pipeline(content):
-        safe_name = "".join(c if c.isalnum() else "_" for c in py_path.stem)
-        output_file = OUTPUT_DIR / f"{safe_name}_github.py"
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(f"# EXTRAIT DE → {py_path.relative_to(BASE_DIR)}\n\n")
-            f.write(content)
-        print(f"EXTRAIT → {output_file.name}")
-        return str(output_file)
-    return None
+# =============================
+# 4) EXTRACTION PRINCIPALE
+# =============================
 
-# === RECHERCHE DES FICHIERS ===
-def find_all_candidates():
-    candidates = []
-    # .ipynb
-    for pattern in [
-        str(KAGGLE_NB_DIR / "**" / "*.ipynb"),
-        str(GITHUB_REPOS_DIR / "**" / "*.ipynb")
-    ]:
-        candidates.extend(glob.glob(pattern, recursive=True))
-    # .py
-    for py_file in GITHUB_REPOS_DIR.rglob("*.py"):
-        if not any(excl in py_file.parts for excl in ["__pycache__", ".git", "venv", "env"]):
-            candidates.append(str(py_file))
-    return candidates
+def extract_all_pyspark_scripts():
+    scripts = []
 
-# === TRAITEMENT PARALLÈLE ===
-def process_file(path_str: str):
-    path = Path(path_str)
-    if path.suffix == ".ipynb":
-        return extract_from_ipynb(path)
-    elif path.suffix == ".py":
-        return extract_from_py(path)
-    return None
+    print("🔍 Scan Kaggle notebooks...")
+    search_in_directory(KAGGLE, scripts)
 
-# === MAIN ===
-def main():
-    candidates = find_all_candidates()
-    print(f"{len(candidates)} fichiers trouvés")
+    print("🔍 Scan GitHub repositories...")
+    search_in_directory(GITHUB, scripts)
 
-    if not candidates:
-        print("Aucun fichier → vérifie data/kaggle_notebooks et data/github_repos")
+    if not scripts:
+        print("❌ Aucun code PySpark trouvé.")
         return
 
-    workers = min(cpu_count(), 8)
-    print(f"Extraction parallèle sur {workers} cœurs...")
+    print(f"✨ {len(scripts)} fichiers PySpark trouvés")
 
-    with Pool(workers) as pool:
-        results = pool.map(process_file, candidates)
+    # Enregistrer les scripts patchés
+    for idx, (source_path, raw_code) in enumerate(scripts, start=1):
+        patched = patch_paths(raw_code)
+        outfile = OUTPUT / f"script_{idx:03d}.py"
+        outfile.write_text(patched)
+        print(f"   ➜ script_{idx:03d}.py extrait depuis {source_path}")
 
-    extracted = [r for r in results if r]
-    print(f"\nEXTRACTION TERMINÉE ! {len(extracted)} VRAIS PIPELINES ETL extraits")
-    print("Prêts pour traduction Dask !")
 
 if __name__ == "__main__":
-    main()
+    extract_all_pyspark_scripts()
+    print("\n🎉 Extraction complète !")
+
+

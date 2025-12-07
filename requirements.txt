@@ -1,0 +1,10 @@
+kaggle
+streamlit
+pandas
+altair
+dask[dataframe]
+dask-ml
+mistral-sdk
+fsspec
+python-dotenv
+

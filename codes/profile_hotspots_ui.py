@@ -1,4 +1,4 @@
-# codes/profile_pyspark.py (fusion + parallélisation)
+# codes/profile_hotspots_ui.py (amélioré 2025 – ports dynamiques + pool 16)
 import os
 import glob
 import time
@@ -6,17 +6,15 @@ import psutil
 import webbrowser
 import subprocess
 import requests
-from multiprocessing import Pool
+from multiprocessing import Pool, cpu_count
 from pyspark.sql import SparkSession
 
-EXTRACTED_DIR = "./extracted_scripts"
+EXTRACTED_DIR = "../data/extracted_scripts"
 DATA_DIR = "../data"
 CSV_FILES = glob.glob(f"{DATA_DIR}/*.csv")
 
-def get_spark_ui_metrics(app_name):
+def get_spark_ui_metrics(app_name, port=4040):
     try:
-        # Adapter port si conflit
-        port = 4040
         jobs = requests.get(f"http://localhost:{port}/api/v1/applications/{app_name}/jobs", timeout=5).json()
         stages = requests.get(f"http://localhost:{port}/api/v1/applications/{app_name}/stages", timeout=5).json()
         return {
@@ -27,7 +25,8 @@ def get_spark_ui_metrics(app_name):
     except:
         return {"has_groupby": False, "has_udf": False, "shuffle_mb": 0}
 
-def profile_single(py_file):
+def profile_single(args):
+    py_file, index = args
     name = os.path.basename(py_file)
     print(f"\nPROFILAGE : {name}")
     
@@ -37,6 +36,8 @@ def profile_single(py_file):
         content = f.read()
     
     app_name = f"Profile_{name.replace('.py', '')}"
+    ui_port = 4040 + index  # Dynamique : 4040, 4041, etc. pour éviter conflits
+    
     executable = f"""
 import time
 from pyspark.sql import SparkSession
@@ -49,8 +50,9 @@ if __name__ == "__main__":
         .appName("{app_name}") \\
         .master("local[2]") \\
         .config("spark.ui.enabled", "true") \\
-        .config("spark.ui.port", "4040") \\
+        .config("spark.ui.port", "{ui_port}") \\
         .config("spark.driver.memory", "2g") \\
+        .config("spark.dynamicAllocation.enabled", "true") \\
         .getOrCreate()
     time.sleep(2)
     paths = {CSV_FILES}
@@ -72,14 +74,14 @@ if __name__ == "__main__":
         subprocess.run(["python", temp_file], timeout=60)
         duration = time.time() - start
         mem_after = process.memory_info().rss / 1024**2
-        metrics = get_spark_ui_metrics(app_name)
+        metrics = get_spark_ui_metrics(app_name, ui_port)
         
         print(f"Temps: {duration:.2f}s | Mémoire +{mem_after - mem_before:.2f}MB")
         print("Hotspots:")
         if metrics["has_groupby"]: print("- GroupBy → Shuffle détecté (optimiser en Dask avec repartition)")
         if metrics["has_udf"]: print("- UDF → Sérialisation (remplacer par map_partitions)")
         print(f"- Shuffle: {metrics['shuffle_mb']:.1f}MB")
-        webbrowser.open("http://localhost:4040")
+        webbrowser.open(f"http://localhost:{ui_port}")
     except Exception as e:
         print(f"ERREUR: {e}")
     finally:
@@ -89,8 +91,9 @@ if __name__ == "__main__":
 def main():
     py_files = glob.glob(f"{EXTRACTED_DIR}/*_pyspark.py")
     print(f"{len(py_files)} scripts à profiler")
-    with Pool(2) as p:  # Parallélise 2 à la fois (évite conflits ports)
-        p.map(profile_single, py_files)
+    args = [(py, i) for i, py in enumerate(py_files)]
+    with Pool(cpu_count() // 4) as p:  # Ex: 16 sur 64 CPU – équilibré
+        p.map(profile_single, args)
 
 if __name__ == "__main__":
     main()

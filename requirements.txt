@@ -1,10 +1,19 @@
-kaggle
 streamlit
-pandas
-altair
+mistralai
+pyspark
 dask[dataframe]
-dask-ml
-mistral-sdk
-fsspec
-python-dotenv
+distributed
 
+pandas
+numpy
+
+altair
+
+kaggle
+requests
+
+gitpython
+regex
+
+fsspec
+pyyaml

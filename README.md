@@ -1,7 +1,3 @@
-## Message au prof: 
-J'ai des bugs que je ne comprends pas alors que ça marchait pendant le weekend j'essaie de régler le problème avant ce soir.
-Mille excuses monsieur.
-
 # Translating PySpark Pipelines to Dask
 
 # Présentation générale et fonctionnement
@@ -28,7 +24,7 @@ Translating-pyspark-pipelines-to-dask/
 │   ├── train.csv
 │   └── Trans_dim.csv
 ├── docs/
-│    └── Literature review.pdf
+│    └── Final_presentation.pdf
 ├── app.py
 ├── benchmark_comparison.ipynb
 ├── migration_checklist.md
@@ -128,3 +124,7 @@ Il suffira de lancer la pipeline automatisée avec streamlit.
 - Le projet nécessite une connexion Internet pour télécharger les datasets et notebooks.
 - Les performances peuvent varier selon la configuration matérielle.
 - Certaines fonctionnalités dépendent de l'API Kaggle, qui peut être limitée.
+
+
+# Vidéo de démonstration
+La vidéo de démonstration se trouve sur ce lien drive: https://drive.google.com/file/d/1DN0hUbd8kfWM40b-6Wdj3NjdvmVgXhoS/view?usp=sharing

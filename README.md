@@ -1,3 +1,7 @@
+## Message au prof: 
+J'ai des bugs que je ne comprends pas alors que ça marchait pendant le weekend j'essaie de régler le problème avant ce soir.
+Mille excuses monsieur.
+
 # Translating PySpark Pipelines to Dask
 
 # Présentation générale et fonctionnement
